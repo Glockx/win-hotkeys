@@ -216,7 +216,7 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                     Ok(state) => state,
                     Err(_) => {
                         // If we can't update keyboard state, block the key
-                        return LRESULT(1);
+                        return CallNextHookEx(None, code, wparam, lparam);
                     }
                 };
 
@@ -229,7 +229,7 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                     .is_err()
                 {
                     // If sending fails (receiver dropped), block the key
-                    return LRESULT(1);
+                    return CallNextHookEx(None, code, wparam, lparam);
                 }
 
                 // Wait for response on how to handle event
