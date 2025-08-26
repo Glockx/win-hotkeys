@@ -152,11 +152,12 @@ pub fn start() -> KeyboardHook {
 }
 
 /// Updates global keyboard state for given virtual key code.
-fn update_keyboard_state(vk_code: u16) {
-    let mutex = KEYBOARD_STATE.get();
-    let mut keyboard = mutex.unwrap().lock().unwrap();
+fn update_keyboard_state(vk_code: u16) -> Result<KeyboardState, ()> {
+    let mutex = KEYBOARD_STATE.get().ok_or(())?;
+    let mut keyboard = mutex.lock().map_err(|_| ())?;
     keyboard.sync();
     keyboard.keydown(vk_code);
+    Ok(*keyboard)
 }
 
 /// Sends a keydown and keyup event for Unassigned Virtual Key 0xE8.
@@ -209,13 +210,27 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
             WM_KEYDOWN | WM_SYSKEYDOWN => {
                 // Clear the actions channel of any previous action
                 while let Ok(_) = response_rx.try_recv() {}
-                update_keyboard_state(vk_code);
-                event_tx
+
+                // Try to update keyboard state and get the current state
+                let keyboard_state = match update_keyboard_state(vk_code) {
+                    Ok(state) => state,
+                    Err(_) => {
+                        // If we can't update keyboard state, block the key
+                        return LRESULT(1);
+                    }
+                };
+
+                // Try to send the keyboard event, but don't crash if it fails
+                if event_tx
                     .send(KeyboardEvent::KeyDown {
                         vk_code,
-                        keyboard_state: *KEYBOARD_STATE.get().unwrap().lock().unwrap(),
+                        keyboard_state,
                     })
-                    .unwrap();
+                    .is_err()
+                {
+                    // If sending fails (receiver dropped), block the key
+                    return LRESULT(1);
+                }
 
                 // Wait for response on how to handle event
                 if let Ok(action) = response_rx.recv_timeout(TIMEOUT) {
